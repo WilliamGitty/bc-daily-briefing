@@ -33,6 +33,25 @@ PROMO_KEYWORDS = [
     "win a ",
     "/deals/",
 ]
+# Filters out tabloid/gossip-style items with profanity or personal-insult
+# language in the title - not appropriate for a company-wide briefing.
+# Deliberately a plain keyword list (mechanical, no AI judgment), same
+# approach as PROMO_KEYWORDS above.
+PROFANITY_KEYWORDS = [
+    "bitch",
+    "asshole",
+    "bastard",
+    "bullshit",
+    "shit",
+    "fuck",
+    "dumbass",
+    "dipshit",
+    "douche",
+    "scumbag",
+    "idiot",
+    "moron",
+    "loser",
+]
 USER_AGENT = (
     "Mozilla/5.0 (compatible; BCDailyBriefingBot/1.0; "
     "+https://github.com/WilliamGitty/bc-daily-briefing)"
@@ -195,6 +214,8 @@ def fetch_recent_items(feed_url, cutoff, keyword=None):
         seen_links.add(link)
         promo_haystack = f"{title} {link}".lower()
         if any(kw in promo_haystack for kw in PROMO_KEYWORDS):
+            continue
+        if any(kw in title.lower() for kw in PROFANITY_KEYWORDS):
             continue
         if keyword:
             haystack = f"{title} {summary}".lower()
