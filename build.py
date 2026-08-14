@@ -65,6 +65,8 @@ BBC_TECH = "http://feeds.bbci.co.uk/news/technology/rss.xml"
 VERGE_TECH = "https://www.theverge.com/rss/tech/index.xml"
 ARSTECHNICA_TECH = "https://feeds.arstechnica.com/arstechnica/index"
 
+OPENAI_NEWS = "https://openai.com/news/rss.xml"
+
 TECHCRUNCH_ENTERPRISE = "https://techcrunch.com/category/enterprise/feed/"
 
 TECHCRUNCH_FINTECH = "https://techcrunch.com/category/fintech/feed/"
@@ -80,6 +82,22 @@ HACKER_NEWS = "https://feeds.feedburner.com/TheHackersNews"
 KREBS_SECURITY = "https://krebsonsecurity.com/feed/"
 
 SECTIONS = [
+    # Anthropic/OpenAI sections come before the general AI section so that
+    # dedup lets a company-specific story claim its more specific section
+    # rather than also appearing in the generic AI feed below.
+    {
+        "key": "anthropic",
+        "title": "Anthropic",
+        "feeds": [TECHCRUNCH_AI, VERGE_AI, ARSTECHNICA_AI, BBC_TECH, VERGE_TECH, ARSTECHNICA_TECH],
+        "keywords": ["anthropic", "claude ai"],
+    },
+    {
+        "key": "openai",
+        "title": "OpenAI",
+        "feeds": [TECHCRUNCH_AI, VERGE_AI, ARSTECHNICA_AI, BBC_TECH, VERGE_TECH, ARSTECHNICA_TECH],
+        "always_feeds": [OPENAI_NEWS],
+        "keywords": ["openai", "chatgpt"],
+    },
     {"key": "ai", "title": "AI", "feeds": [TECHCRUNCH_AI, VERGE_AI, ARSTECHNICA_AI]},
     {"key": "tech", "title": "Tech", "feeds": [BBC_TECH, VERGE_TECH, ARSTECHNICA_TECH]},
     {
@@ -190,7 +208,7 @@ def source_name(entry, feed_url):
     return host or "Source"
 
 
-def fetch_recent_items(feed_url, cutoff, keyword=None):
+def fetch_recent_items(feed_url, cutoff, keywords=None):
     parsed = feedparser.parse(feed_url)
     now = datetime.now(timezone.utc)
     items = []
@@ -217,9 +235,9 @@ def fetch_recent_items(feed_url, cutoff, keyword=None):
             continue
         if any(kw in title.lower() for kw in PROFANITY_KEYWORDS):
             continue
-        if keyword:
+        if keywords:
             haystack = f"{title} {summary}".lower()
-            if keyword.lower() not in haystack:
+            if not any(kw.lower() in haystack for kw in keywords):
                 continue
         items.append(
             {
@@ -281,10 +299,26 @@ def build_sections():
     for section in SECTIONS:
         candidates = []
         for feed_url in section["feeds"]:
-            candidates.extend(fetch_recent_items(feed_url, cutoff, keyword=section.get("keyword")))
+            candidates.extend(fetch_recent_items(feed_url, cutoff, keywords=section.get("keywords")))
+        # Feeds that are already inherently about the section's topic (e.g.
+        # a company's own official feed) shouldn't be keyword-filtered -
+        # their own headlines often don't literally contain the company
+        # name (e.g. "The builder's guide to GPT-5.6" never says "OpenAI").
+        for feed_url in section.get("always_feeds", []):
+            candidates.extend(fetch_recent_items(feed_url, cutoff, keywords=None))
 
         candidates.sort(key=lambda i: i["published"], reverse=True)
-        deduped = [c for c in candidates if c["link"] not in used_links]
+        # Dedupe within this section first (the same article can appear in
+        # more than one of this section's own feeds, e.g. a site's
+        # topic-specific feed and its general feed both carrying one story),
+        # then dedupe against links already claimed by an earlier section.
+        seen_in_section = set()
+        deduped = []
+        for c in candidates:
+            if c["link"] in seen_in_section or c["link"] in used_links:
+                continue
+            seen_in_section.add(c["link"])
+            deduped.append(c)
         picked = select_diverse(deduped)
 
         for item in picked:
